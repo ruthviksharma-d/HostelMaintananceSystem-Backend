@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.hms.hostelmaintanancesystem.common.ApiResponse;
 import org.hms.hostelmaintanancesystem.request.dto.CreateRequestDTO;
 import org.hms.hostelmaintanancesystem.request.dto.RequestResponse;
+import org.hms.hostelmaintanancesystem.request.dto.UpdateRequestStatusDTO;
 import org.hms.hostelmaintanancesystem.security.CustomUserDetails;
 import org.hms.hostelmaintanancesystem.user.User;
 import org.springframework.http.HttpStatus;
@@ -102,6 +103,41 @@ public class MaintenanceRequestController {
 
         return ResponseEntity
                 .ok(ApiResponse.success("Request retrieved successfully", response));
+    }
+
+    /**
+     * Updates the status of a request.
+     *
+     * Endpoint: PUT /api/requests/{id}/status
+     * Access: MAINTENANCE only
+     */
+    @PutMapping("/{id}/status")
+    public ResponseEntity<ApiResponse<RequestResponse>> updateRequestStatus(
+            @PathVariable Long id,
+            @RequestBody @Valid UpdateRequestStatusDTO updateDTO) {
+
+        RequestResponse response = requestService.updateStatus(id, updateDTO);
+
+        return ResponseEntity
+                .ok(ApiResponse.success("Request status updated successfully", response));
+    }
+
+    /**
+     * Closes a request.
+     *
+     * Endpoint: PUT /api/requests/{id}/close
+     * Access: TENANT only (Ownership check inside service)
+     */
+    @PutMapping("/{id}/close")
+    public ResponseEntity<ApiResponse<RequestResponse>> closeRequest(
+            @PathVariable Long id,
+            @AuthenticationPrincipal CustomUserDetails userDetails) {
+
+        User currentUser = userDetails.getUser();
+        RequestResponse response = requestService.closeRequest(id, currentUser);
+
+        return ResponseEntity
+                .ok(ApiResponse.success("Request closed successfully", response));
     }
 
 }

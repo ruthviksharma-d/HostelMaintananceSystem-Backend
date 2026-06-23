@@ -5,9 +5,11 @@ import org.hms.hostelmaintanancesystem.common.exception.ResourceNotFoundExceptio
 import org.hms.hostelmaintanancesystem.common.exception.UnauthorizedAccessException;
 import org.hms.hostelmaintanancesystem.request.dto.CreateRequestDTO;
 import org.hms.hostelmaintanancesystem.request.dto.RequestResponse;
+import org.hms.hostelmaintanancesystem.request.dto.UpdateRequestStatusDTO;
 import org.hms.hostelmaintanancesystem.user.User;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -90,6 +92,57 @@ public class MaintenanceRequestService {
         return requestRepository.findAllByOrderByCreatedAtDesc().stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Updates the status of a request (by MAINTENANCE staff).
+     *
+     * If status is set to RESOLVED, a resolution note can be added,
+     * and the resolvedAt timestamp is set.
+     *
+     * @param id   the request ID
+     * @param dto  the status update payload
+     * @return the updated request DTO
+     */
+    public RequestResponse updateStatus(Long id, UpdateRequestStatusDTO dto) {
+        MaintenanceRequest request = findRequestEntityById(id);
+
+        request.setStatus(dto.getStatus());
+
+        if (dto.getStatus() == RequestStatus.RESOLVED) {
+            request.setResolutionNote(dto.getResolutionNote());
+            request.setResolvedAt(LocalDateTime.now());
+        }
+
+        MaintenanceRequest updatedRequest = requestRepository.save(request);
+        return mapToResponse(updatedRequest);
+    }
+
+    /**
+     * Closes a request (by TENANT).
+     *
+     * Tenants can only close their own requests, and typically only
+     * after they are resolved (or if they want to cancel an open one).
+     *
+     * @param id   the request ID
+     * @param user the currently authenticated tenant
+     * @return the updated request DTO
+     */
+    public RequestResponse closeRequest(Long id, User user) {
+        MaintenanceRequest request = findRequestEntityById(id);
+
+        // Ownership validation
+        if (!request.getCreatedBy().getId().equals(user.getId())) {
+            throw new UnauthorizedAccessException("You can only close your own maintenance requests.");
+        }
+
+        // Optional logic: we could enforce that they can only close if it's RESOLVED,
+        // but often tenants cancel requests that are OPEN too. For now, just close it.
+        request.setStatus(RequestStatus.CLOSED);
+        request.setClosedAt(LocalDateTime.now());
+
+        MaintenanceRequest updatedRequest = requestRepository.save(request);
+        return mapToResponse(updatedRequest);
     }
 
     /**
