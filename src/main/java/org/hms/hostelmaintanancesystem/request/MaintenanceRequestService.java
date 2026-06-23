@@ -1,12 +1,16 @@
 package org.hms.hostelmaintanancesystem.request;
 
 import lombok.RequiredArgsConstructor;
+import org.hms.hostelmaintanancesystem.common.dto.PageResponse;
 import org.hms.hostelmaintanancesystem.common.exception.ResourceNotFoundException;
 import org.hms.hostelmaintanancesystem.common.exception.UnauthorizedAccessException;
 import org.hms.hostelmaintanancesystem.request.dto.CreateRequestDTO;
 import org.hms.hostelmaintanancesystem.request.dto.RequestResponse;
 import org.hms.hostelmaintanancesystem.request.dto.UpdateRequestStatusDTO;
 import org.hms.hostelmaintanancesystem.user.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -70,28 +74,44 @@ public class MaintenanceRequestService {
     }
 
     /**
-     * Retrieves all requests created by the given user.
+     * Retrieves requests created by the given user, with optional filters and pagination.
      * Primarily used by tenants for their dashboard.
      *
-     * @param user the currently authenticated user
-     * @return list of their requests
+     * @param user     the currently authenticated user
+     * @param status   optional status filter
+     * @param category optional category filter
+     * @param pageable pagination parameters (page, size, sort)
+     * @return paginated list of their requests
      */
-    public List<RequestResponse> getMyRequests(User user) {
-        return requestRepository.findByCreatedByOrderByCreatedAtDesc(user).stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+    public PageResponse<RequestResponse> getMyRequests(User user, RequestStatus status, RequestCategory category, Pageable pageable) {
+        // Base specification: must belong to the current user
+        Specification<MaintenanceRequest> spec = (root, query, cb) ->
+                cb.equal(root.get("createdBy"), user);
+
+        // Add dynamic filters
+        Specification<MaintenanceRequest> filters = RequestSpecification.filterBy(status, category);
+        spec = spec.and(filters);
+
+        Page<MaintenanceRequest> page = requestRepository.findAll(spec, pageable);
+
+        return PageResponse.of(page.map(this::mapToResponse));
     }
 
     /**
-     * Retrieves all requests in the system.
+     * Retrieves all requests in the system, with optional filters and pagination.
      * Primarily used by maintenance staff.
      *
-     * @return list of all requests
+     * @param status   optional status filter
+     * @param category optional category filter
+     * @param pageable pagination parameters
+     * @return paginated list of all requests
      */
-    public List<RequestResponse> getAllRequests() {
-        return requestRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+    public PageResponse<RequestResponse> getAllRequests(RequestStatus status, RequestCategory category, Pageable pageable) {
+        Specification<MaintenanceRequest> spec = RequestSpecification.filterBy(status, category);
+
+        Page<MaintenanceRequest> page = requestRepository.findAll(spec, pageable);
+
+        return PageResponse.of(page.map(this::mapToResponse));
     }
 
     /**

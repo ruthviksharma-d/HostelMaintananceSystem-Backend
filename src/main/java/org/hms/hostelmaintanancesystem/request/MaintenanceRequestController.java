@@ -3,11 +3,15 @@ package org.hms.hostelmaintanancesystem.request;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.hms.hostelmaintanancesystem.common.ApiResponse;
+import org.hms.hostelmaintanancesystem.common.dto.PageResponse;
 import org.hms.hostelmaintanancesystem.request.dto.CreateRequestDTO;
 import org.hms.hostelmaintanancesystem.request.dto.RequestResponse;
 import org.hms.hostelmaintanancesystem.request.dto.UpdateRequestStatusDTO;
 import org.hms.hostelmaintanancesystem.security.CustomUserDetails;
 import org.hms.hostelmaintanancesystem.user.User;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -55,32 +59,51 @@ public class MaintenanceRequestController {
     }
 
     /**
-     * Retrieves all requests created by the logged-in tenant.
+     * Retrieves all requests created by the logged-in tenant (with pagination/filters).
      *
      * Endpoint: GET /api/requests/my
      * Access: TENANT only
      */
     @GetMapping("/my")
-    public ResponseEntity<ApiResponse<List<RequestResponse>>> getMyRequests(
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
+    public ResponseEntity<ApiResponse<PageResponse<RequestResponse>>> getMyRequests(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam(required = false) RequestStatus status,
+            @RequestParam(required = false) RequestCategory category,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
 
         User currentUser = userDetails.getUser();
-        List<RequestResponse> requests = requestService.getMyRequests(currentUser);
+        
+        Sort sort = sortDir.equalsIgnoreCase(Sort.Direction.ASC.name()) ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
+
+        PageResponse<RequestResponse> requests = requestService.getMyRequests(currentUser, status, category, pageable);
 
         return ResponseEntity
                 .ok(ApiResponse.success("Requests retrieved successfully", requests));
     }
 
     /**
-     * Retrieves all requests in the system.
+     * Retrieves all requests in the system (with pagination/filters).
      *
      * Endpoint: GET /api/requests
      * Access: MAINTENANCE only
      */
     @GetMapping
-    public ResponseEntity<ApiResponse<List<RequestResponse>>> getAllRequests() {
+    public ResponseEntity<ApiResponse<PageResponse<RequestResponse>>> getAllRequests(
+            @RequestParam(required = false) RequestStatus status,
+            @RequestParam(required = false) RequestCategory category,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
 
-        List<RequestResponse> requests = requestService.getAllRequests();
+        Sort sort = sortDir.equalsIgnoreCase(Sort.Direction.ASC.name()) ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
+
+        PageResponse<RequestResponse> requests = requestService.getAllRequests(status, category, pageable);
 
         return ResponseEntity
                 .ok(ApiResponse.success("All requests retrieved successfully", requests));

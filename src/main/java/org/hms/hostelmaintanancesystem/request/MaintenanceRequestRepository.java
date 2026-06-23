@@ -2,6 +2,7 @@ package org.hms.hostelmaintanancesystem.request;
 
 import org.hms.hostelmaintanancesystem.user.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -17,7 +18,7 @@ import java.util.List;
  *   Property names MUST match the Java entity field names.
  */
 @Repository
-public interface MaintenanceRequestRepository extends JpaRepository<MaintenanceRequest, Long> {
+public interface MaintenanceRequestRepository extends JpaRepository<MaintenanceRequest, Long>, JpaSpecificationExecutor<MaintenanceRequest> {
 
     /**
      * Finds all requests created by a specific user.
