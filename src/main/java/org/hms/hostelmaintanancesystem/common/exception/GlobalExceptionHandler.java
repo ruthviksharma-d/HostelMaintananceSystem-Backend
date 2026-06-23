@@ -3,6 +3,9 @@ package org.hms.hostelmaintanancesystem.common.exception;
 import org.hms.hostelmaintanancesystem.common.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
@@ -61,6 +64,49 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Handles invalid login credentials.
+     *
+     * Triggered when: AuthenticationManager.authenticate() fails because
+     *   the password doesn't match the stored hash.
+     * Returns: 401 Unauthorized.
+     *
+     * Note: Spring Security intentionally uses the same exception for
+     *   "user not found" and "wrong password" to prevent user enumeration.
+     */
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBadCredentials(BadCredentialsException ex) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.error("Invalid email or password"));
+    }
+
+    /**
+     * Handles cases where a user is not found by email during authentication.
+     *
+     * Triggered when: CustomUserDetailsService.loadUserByUsername() throws.
+     * Returns: 401 Unauthorized (same as bad credentials to prevent enumeration).
+     */
+    @ExceptionHandler(UsernameNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUsernameNotFound(UsernameNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.error("Invalid email or password"));
+    }
+
+    /**
+     * Handles authorization failures (user is authenticated but lacks permission).
+     *
+     * Triggered when: A TENANT tries to access a MAINTENANCE-only endpoint, etc.
+     * Returns: 403 Forbidden.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("You do not have permission to access this resource"));
     }
 
     /**

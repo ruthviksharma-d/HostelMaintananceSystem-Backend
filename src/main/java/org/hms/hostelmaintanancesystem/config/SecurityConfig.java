@@ -1,7 +1,12 @@
 package org.hms.hostelmaintanancesystem.config;
 
+import org.hms.hostelmaintanancesystem.security.CustomUserDetailsService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -11,25 +16,21 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * TEMPORARY Security Configuration for Phase 3.
+ * TEMPORARY Security Configuration for Phase 3-4.
  *
  * In Phase 5 (JWT Authentication), this will be replaced with:
  *   - JwtAuthenticationFilter added to the filter chain
  *   - .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
- *
- * Purpose NOW:
- *   1. Allow unauthenticated access to /api/auth/** (register, login)
- *   2. Keep all other endpoints protected (preparation for JWT)
- *   3. Disable formLogin and httpBasic (we're a REST API, not a web app)
- *   4. Stateless sessions (no server-side session storage)
- *
- * @Configuration        -> Marks this as a Spring config class.
- * @EnableWebSecurity    -> Enables Spring Security's web security support.
- *                           Without this, the SecurityFilterChain bean is ignored.
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    private final CustomUserDetailsService customUserDetailsService;
+
+    public SecurityConfig(CustomUserDetailsService customUserDetailsService) {
+        this.customUserDetailsService = customUserDetailsService;
+    }
 
     /**
      * PasswordEncoder bean using BCrypt.
@@ -46,6 +47,38 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * AuthenticationProvider tells Spring Security HOW to authenticate.
+     *
+     * DaoAuthenticationProvider is the standard provider for username/password auth.
+     * It needs two things:
+     *   1. UserDetailsService -> loads user from DB by username/email
+     *   2. PasswordEncoder    -> verifies raw password against stored hash
+     *
+     * Spring Security 7+ requires UserDetailsService in the constructor
+     * (the no-arg constructor and setUserDetailsService() were removed).
+     */
+    @Bean
+    public AuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(customUserDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        return authProvider;
+    }
+
+    /**
+     * AuthenticationManager is the GATEWAY to authentication.
+     *
+     * When AuthService calls authManager.authenticate(token),
+     * the manager delegates to all registered AuthenticationProviders.
+     * In our case: DaoAuthenticationProvider handles the token.
+     *
+     * We use AuthenticationConfiguration which auto-discovers our provider bean.
+     */
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
     }
 
     /**

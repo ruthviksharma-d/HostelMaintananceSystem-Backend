@@ -1,11 +1,16 @@
 package org.hms.hostelmaintanancesystem.auth;
 
 import lombok.RequiredArgsConstructor;
+import org.hms.hostelmaintanancesystem.auth.dto.LoginRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.RegisterRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.UserResponse;
 import org.hms.hostelmaintanancesystem.common.exception.DuplicateEmailException;
+import org.hms.hostelmaintanancesystem.security.CustomUserDetails;
 import org.hms.hostelmaintanancesystem.user.User;
 import org.hms.hostelmaintanancesystem.user.UserRepository;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +37,39 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+
+    /**
+     * Authenticates a user with email and password.
+     *
+     * Flow:
+     *   1. Create UsernamePasswordAuthenticationToken from request.
+     *   2. Delegate to AuthenticationManager.
+     *   3. AuthenticationManager -> DaoAuthenticationProvider
+     *        -> CustomUserDetailsService.loadUserByUsername(email)
+     *        -> PasswordEncoder.matches(rawPassword, storedHash)
+     *   4. If credentials match, return Authentication object.
+     *   5. Extract CustomUserDetails -> User -> UserResponse.
+     *
+     * Throws:
+     *   BadCredentialsException  -> if email not found OR password wrong
+     *                               (Spring Security hides the difference to
+     *                                prevent user enumeration attacks)
+     *
+     * @param request login credentials
+     * @return UserResponse with safe user data
+     */
+    public UserResponse login(LoginRequest request) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        request.getEmail(),
+                        request.getPassword()
+                )
+        );
+
+        CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
+        return mapToUserResponse(userDetails.getUser());
+    }
 
     /**
      * Registers a new user.
