@@ -1,16 +1,19 @@
 package org.hms.hostelmaintanancesystem.auth;
 
 import lombok.RequiredArgsConstructor;
+import org.hms.hostelmaintanancesystem.auth.dto.AuthResponse;
 import org.hms.hostelmaintanancesystem.auth.dto.LoginRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.RegisterRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.UserResponse;
 import org.hms.hostelmaintanancesystem.common.exception.DuplicateEmailException;
 import org.hms.hostelmaintanancesystem.security.CustomUserDetails;
+import org.hms.hostelmaintanancesystem.security.JwtService;
 import org.hms.hostelmaintanancesystem.user.User;
 import org.hms.hostelmaintanancesystem.user.UserRepository;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -38,9 +41,10 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final JwtService jwtService;
 
     /**
-     * Authenticates a user with email and password.
+     * Authenticates a user with email and password, returns JWT.
      *
      * Flow:
      *   1. Create UsernamePasswordAuthenticationToken from request.
@@ -49,7 +53,7 @@ public class AuthService {
      *        -> CustomUserDetailsService.loadUserByUsername(email)
      *        -> PasswordEncoder.matches(rawPassword, storedHash)
      *   4. If credentials match, return Authentication object.
-     *   5. Extract CustomUserDetails -> User -> UserResponse.
+     *   5. Extract CustomUserDetails -> User -> generate JWT -> return AuthResponse.
      *
      * Throws:
      *   BadCredentialsException  -> if email not found OR password wrong
@@ -57,9 +61,9 @@ public class AuthService {
      *                                prevent user enumeration attacks)
      *
      * @param request login credentials
-     * @return UserResponse with safe user data
+     * @return AuthResponse with JWT token and user data
      */
-    public UserResponse login(LoginRequest request) {
+    public AuthResponse login(LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
                         request.getEmail(),
@@ -68,11 +72,22 @@ public class AuthService {
         );
 
         CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
-        return mapToUserResponse(userDetails.getUser());
+        User user = userDetails.getUser();
+
+        String token = jwtService.generateToken(
+                user.getEmail(),
+                user.getId(),
+                user.getRole().name()
+        );
+
+        return AuthResponse.builder()
+                .token(token)
+                .user(mapToUserResponse(user))
+                .build();
     }
 
     /**
-     * Registers a new user.
+     * Registers a new user and returns JWT (so user is logged in immediately).
      *
      * Business Rules:
      *   1. Email must be unique (check DB first).
@@ -80,10 +95,10 @@ public class AuthService {
      *   3. Role must be valid enum (enforced by RegisterRequest bean validation).
      *
      * @param request the registration input from client
-     * @return UserResponse with safe user data (no password)
+     * @return AuthResponse with JWT token and user data
      * @throws DuplicateEmailException if email already exists
      */
-    public UserResponse register(RegisterRequest request) {
+    public AuthResponse register(RegisterRequest request) {
         // Business Rule #1: Unique email
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new DuplicateEmailException(
@@ -107,8 +122,37 @@ public class AuthService {
         // Save to database
         User savedUser = userRepository.save(user);
 
-        // Map to response DTO (strips password)
-        return mapToUserResponse(savedUser);
+        // Generate JWT token for the new user
+        String token = jwtService.generateToken(
+                savedUser.getEmail(),
+                savedUser.getId(),
+                savedUser.getRole().name()
+        );
+
+        // Return AuthResponse with token and user data
+        return AuthResponse.builder()
+                .token(token)
+                .user(mapToUserResponse(savedUser))
+                .build();
+    }
+
+    /**
+     * Returns the currently authenticated user's profile.
+     *
+     * Extracts the user from Spring Security's SecurityContext,
+     * which was set by JwtAuthenticationFilter during request processing.
+     *
+     * @return UserResponse with the current user's safe data
+     * @throws RuntimeException if no user is authenticated (should never happen
+     *                          because this endpoint requires authentication)
+     */
+    public UserResponse getCurrentUser() {
+        CustomUserDetails userDetails = (CustomUserDetails) SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getPrincipal();
+
+        return mapToUserResponse(userDetails.getUser());
     }
 
     /**

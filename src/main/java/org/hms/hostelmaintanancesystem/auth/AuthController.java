@@ -2,6 +2,8 @@ package org.hms.hostelmaintanancesystem.auth;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.hms.hostelmaintanancesystem.auth.dto.AuthResponse;
+import org.hms.hostelmaintanancesystem.auth.dto.LoginRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.RegisterRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.UserResponse;
 import org.hms.hostelmaintanancesystem.common.ApiResponse;
@@ -13,9 +15,9 @@ import org.springframework.web.bind.annotation.*;
  * REST Controller for authentication endpoints.
  *
  * Base path: /api/auth
- *   POST /api/auth/register  -> Create a new user account
- *   (Phase 4 will add: POST /api/auth/login)
- *   (Phase 5 will add: GET /api/auth/me)
+ *   POST /api/auth/register  -> Create a new user account (returns JWT)
+ *   POST /api/auth/login     -> Authenticate and get JWT
+ *   GET  /api/auth/me        -> Get current authenticated user's profile
  *
  * @RestController       -> Convenience annotation for REST APIs.
  *                           Combines @Controller (Spring-managed bean)
@@ -33,10 +35,10 @@ public class AuthController {
     private final AuthService authService;
 
     /**
-     * Registers a new user (Tenant or Maintenance).
+     * Registers a new user (Tenant or Maintenance) and returns JWT.
      *
      * Endpoint: POST /api/auth/register
-     * Content-Type: application/json
+     * Access:   PUBLIC (no authentication required)
      *
      * Request Body:
      *   {
@@ -58,24 +60,98 @@ public class AuthController {
      *     "success": true,
      *     "message": "User registered successfully",
      *     "data": {
-     *       "id": 1,
-     *       "name": "John Doe",
-     *       "email": "john@example.com",
-     *       "role": "TENANT",
-     *       "createdAt": "2024-01-15T10:30:00"
+     *       "token": "eyJhbGciOiJIUzI1NiJ9...",
+     *       "tokenType": "Bearer",
+     *       "user": {
+     *         "id": 1,
+     *         "name": "John Doe",
+     *         "email": "john@example.com",
+     *         "role": "TENANT",
+     *         "createdAt": "2024-01-15T10:30:00"
+     *       }
      *     },
      *     "timestamp": "2024-01-15T10:30:05"
      *   }
      */
     @PostMapping("/register")
-    public ResponseEntity<ApiResponse<UserResponse>> register(
+    public ResponseEntity<ApiResponse<AuthResponse>> register(
             @RequestBody @Valid RegisterRequest request) {
 
-        UserResponse userResponse = authService.register(request);
+        AuthResponse authResponse = authService.register(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ApiResponse.success("User registered successfully", userResponse));
+                .body(ApiResponse.success("User registered successfully", authResponse));
+    }
+
+    /**
+     * Authenticates a user and returns JWT.
+     *
+     * Endpoint: POST /api/auth/login
+     * Access:   PUBLIC (no authentication required)
+     *
+     * Request Body:
+     *   {
+     *     "email": "john@example.com",
+     *     "password": "password123"
+     *   }
+     *
+     * Response: 200 OK
+     *   {
+     *     "success": true,
+     *     "message": "Login successful",
+     *     "data": {
+     *       "token": "eyJhbGciOiJIUzI1NiJ9...",
+     *       "tokenType": "Bearer",
+     *       "user": { ... }
+     *     }
+     *   }
+     *
+     * Error: 401 Unauthorized (invalid credentials)
+     *   {
+     *     "success": false,
+     *     "message": "Invalid email or password"
+     *   }
+     */
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponse<AuthResponse>> login(
+            @RequestBody @Valid LoginRequest request) {
+
+        AuthResponse authResponse = authService.login(request);
+
+        return ResponseEntity
+                .ok(ApiResponse.success("Login successful", authResponse));
+    }
+
+    /**
+     * Returns the currently authenticated user's profile.
+     *
+     * Endpoint: GET /api/auth/me
+     * Access:   AUTHENTICATED (requires valid JWT in Authorization header)
+     *
+     * Headers required:
+     *   Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+     *
+     * Response: 200 OK
+     *   {
+     *     "success": true,
+     *     "message": "User profile retrieved successfully",
+     *     "data": {
+     *       "id": 1,
+     *       "name": "John Doe",
+     *       "email": "john@example.com",
+     *       "role": "TENANT",
+     *       "createdAt": "2024-01-15T10:30:00"
+     *     }
+     *   }
+     */
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser() {
+
+        UserResponse userResponse = authService.getCurrentUser();
+
+        return ResponseEntity
+                .ok(ApiResponse.success("User profile retrieved successfully", userResponse));
     }
 
 }

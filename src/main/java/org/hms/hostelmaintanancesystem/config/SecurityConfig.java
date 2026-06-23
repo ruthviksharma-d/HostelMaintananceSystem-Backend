@@ -1,6 +1,7 @@
 package org.hms.hostelmaintanancesystem.config;
 
 import org.hms.hostelmaintanancesystem.security.CustomUserDetailsService;
+import org.hms.hostelmaintanancesystem.security.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -14,29 +15,42 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * TEMPORARY Security Configuration for Phase 3-4.
+ * Security Configuration for JWT-based authentication.
  *
- * In Phase 5 (JWT Authentication), this will be replaced with:
- *   - JwtAuthenticationFilter added to the filter chain
- *   - .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+ * Filter chain order:
+ *   JwtAuthenticationFilter (our custom filter)
+ *        ↓
+ *   UsernamePasswordAuthenticationFilter (Spring's default, disabled for us)
+ *        ↓
+ *   Authorization filters
+ *        ↓
+ *   Controller
+ *
+ * Key decisions:
+ *   - CSRF disabled: REST APIs using JWT tokens are not vulnerable to CSRF.
+ *   - Stateless sessions: No server-side sessions; each request is independent.
+ *   - Form login disabled: We use JWT, not HTML form login.
+ *   - HTTP Basic disabled: We use JWT, not browser popups.
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
     private final CustomUserDetailsService customUserDetailsService;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
-    public SecurityConfig(CustomUserDetailsService customUserDetailsService) {
+    public SecurityConfig(
+            CustomUserDetailsService customUserDetailsService,
+            JwtAuthenticationFilter jwtAuthenticationFilter) {
         this.customUserDetailsService = customUserDetailsService;
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     }
 
     /**
      * PasswordEncoder bean using BCrypt.
-     *
-     * Why @Bean?
-     *   Spring injects this wherever PasswordEncoder is needed (AuthService).
      *
      * Why BCrypt?
      *   - Industry standard (OWASP recommends it)
@@ -57,8 +71,7 @@ public class SecurityConfig {
      *   1. UserDetailsService -> loads user from DB by username/email
      *   2. PasswordEncoder    -> verifies raw password against stored hash
      *
-     * Spring Security 7+ requires UserDetailsService in the constructor
-     * (the no-arg constructor and setUserDetailsService() were removed).
+     * Spring Security 7+ requires UserDetailsService in the constructor.
      */
     @Bean
     public AuthenticationProvider authenticationProvider() {
@@ -73,8 +86,6 @@ public class SecurityConfig {
      * When AuthService calls authManager.authenticate(token),
      * the manager delegates to all registered AuthenticationProviders.
      * In our case: DaoAuthenticationProvider handles the token.
-     *
-     * We use AuthenticationConfiguration which auto-discovers our provider bean.
      */
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
@@ -82,39 +93,43 @@ public class SecurityConfig {
     }
 
     /**
-     * Defines the security filter chain.
+     * Defines the security filter chain with JWT authentication.
      *
-     * SecurityFilterChain is the modern Spring Security 6+ way.
-     * The old WebSecurityConfigurerAdapter is deprecated.
-     *
-     * Request flow through this chain:
+     * Request flow:
      *   Incoming Request
      *        ↓
      *   CSRF Filter (disabled for REST APIs)
      *        ↓
-     *   Authentication checks
+     *   JwtAuthenticationFilter (extracts + validates JWT)
      *        ↓
-     *   Authorization (permitAll vs authenticated)
+     *   Authorization checks (permitAll vs authenticated)
      *        ↓
      *   Controller
      *
-     * @param http  HttpSecurity DSL builder
+     * Public endpoints (no JWT needed):
+     *   - POST /api/auth/register
+     *   - POST /api/auth/login
+     *
+     * Protected endpoints (valid JWT required):
+     *   - GET /api/auth/me
+     *   - Everything else
      */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 // Disable CSRF (Cross-Site Request Forgery)
                 // REST APIs using tokens are not vulnerable to CSRF.
-                // CSRF protection is for form submissions with session cookies.
                 .csrf(AbstractHttpConfigurer::disable)
 
                 // Configure authorization rules
                 .authorizeHttpRequests(auth -> auth
-                        // Phase 3: Allow public access to auth endpoints
-                        .requestMatchers("/api/auth/**").permitAll()
+                        // Public endpoints — no authentication required
+                        .requestMatchers(
+                                "/api/auth/register",
+                                "/api/auth/login"
+                        ).permitAll()
 
                         // Everything else requires authentication
-                        // (Will be enforced by JWT filter in Phase 5-6)
                         .anyRequest().authenticated()
                 )
 
@@ -128,6 +143,13 @@ public class SecurityConfig {
                 // Each request must carry its own authentication (JWT token)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+
+                // Add our JWT filter BEFORE Spring's UsernamePasswordAuthenticationFilter
+                // This ensures JWT is checked before any default auth mechanism
+                .addFilterBefore(
+                        jwtAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class
                 );
 
         return http.build();
