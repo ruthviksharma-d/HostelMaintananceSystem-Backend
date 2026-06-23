@@ -7,7 +7,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -18,25 +20,24 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Security Configuration for JWT-based authentication.
+ * Security Configuration for JWT-based authentication with RBAC.
  *
- * Filter chain order:
- *   JwtAuthenticationFilter (our custom filter)
- *        ↓
- *   UsernamePasswordAuthenticationFilter (Spring's default, disabled for us)
- *        ↓
- *   Authorization filters
- *        ↓
- *   Controller
+ * Two layers of access control:
  *
- * Key decisions:
- *   - CSRF disabled: REST APIs using JWT tokens are not vulnerable to CSRF.
- *   - Stateless sessions: No server-side sessions; each request is independent.
- *   - Form login disabled: We use JWT, not HTML form login.
- *   - HTTP Basic disabled: We use JWT, not browser popups.
+ *   1. URL-level (this class):
+ *      Coarse-grained rules based on roles.
+ *      Example: Only MAINTENANCE can access GET /api/requests (all requests).
+ *
+ *   2. Method-level (@PreAuthorize in controllers/services):
+ *      Fine-grained rules based on ownership.
+ *      Example: TENANT can only view their OWN requests.
+ *
+ * @EnableMethodSecurity -> Activates @PreAuthorize, @PostAuthorize, @Secured.
+ *   Without this, @PreAuthorize annotations are silently ignored!
  */
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final CustomUserDetailsService customUserDetailsService;
@@ -93,60 +94,67 @@ public class SecurityConfig {
     }
 
     /**
-     * Defines the security filter chain with JWT authentication.
+     * Defines the security filter chain with JWT authentication and RBAC.
      *
-     * Request flow:
-     *   Incoming Request
-     *        ↓
-     *   CSRF Filter (disabled for REST APIs)
-     *        ↓
-     *   JwtAuthenticationFilter (extracts + validates JWT)
-     *        ↓
-     *   Authorization checks (permitAll vs authenticated)
-     *        ↓
-     *   Controller
+     * Access control matrix:
      *
-     * Public endpoints (no JWT needed):
-     *   - POST /api/auth/register
-     *   - POST /api/auth/login
+     *   PUBLIC (no JWT):
+     *     POST /api/auth/register
+     *     POST /api/auth/login
      *
-     * Protected endpoints (valid JWT required):
-     *   - GET /api/auth/me
-     *   - Everything else
+     *   TENANT only:
+     *     POST   /api/requests          (create a request)
+     *     GET    /api/requests/my        (view own requests)
+     *     PUT    /api/requests/{id}/close (close own resolved request)
+     *
+     *   MAINTENANCE only:
+     *     GET    /api/requests           (view all requests)
+     *     PUT    /api/requests/{id}/status (update request status)
+     *
+     *   ANY AUTHENTICATED:
+     *     GET    /api/auth/me
+     *     GET    /api/requests/{id}      (view single — ownership checked in service)
+     *
+     * Note: Fine-grained ownership checks (e.g., tenant can only see their own
+     *       request details) are enforced at the SERVICE layer, not here.
      */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // Disable CSRF (Cross-Site Request Forgery)
-                // REST APIs using tokens are not vulnerable to CSRF.
+                // Disable CSRF — REST APIs using JWT tokens are not vulnerable
                 .csrf(AbstractHttpConfigurer::disable)
 
-                // Configure authorization rules
+                // Authorization rules (evaluated top-to-bottom, first match wins)
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints — no authentication required
+                        // ── Public endpoints ──
                         .requestMatchers(
                                 "/api/auth/register",
                                 "/api/auth/login"
                         ).permitAll()
 
-                        // Everything else requires authentication
+                        // ── TENANT-only endpoints ──
+                        .requestMatchers(HttpMethod.POST, "/api/requests").hasRole("TENANT")
+                        .requestMatchers(HttpMethod.GET, "/api/requests/my").hasRole("TENANT")
+                        .requestMatchers(HttpMethod.PUT, "/api/requests/*/close").hasRole("TENANT")
+
+                        // ── MAINTENANCE-only endpoints ──
+                        .requestMatchers(HttpMethod.GET, "/api/requests").hasRole("MAINTENANCE")
+                        .requestMatchers(HttpMethod.PUT, "/api/requests/*/status").hasRole("MAINTENANCE")
+
+                        // ── Everything else: just needs a valid JWT ──
                         .anyRequest().authenticated()
                 )
 
-                // Disable form-based login (the ugly HTML login page)
+                // Disable form login and HTTP Basic (we use JWT)
                 .formLogin(AbstractHttpConfigurer::disable)
-
-                // Disable HTTP Basic (browser popup for username/password)
                 .httpBasic(AbstractHttpConfigurer::disable)
 
-                // Stateless session = no server-side session storage
-                // Each request must carry its own authentication (JWT token)
+                // Stateless sessions — no server-side session storage
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
-                // Add our JWT filter BEFORE Spring's UsernamePasswordAuthenticationFilter
-                // This ensures JWT is checked before any default auth mechanism
+                // JWT filter runs before Spring's default auth filter
                 .addFilterBefore(
                         jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class

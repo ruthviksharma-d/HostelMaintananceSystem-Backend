@@ -67,6 +67,35 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handles cases where a requested resource does not exist.
+     *
+     * Triggered when: A maintenance request or user with the given ID is not found.
+     * Returns: 404 Not Found.
+     */
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleResourceNotFound(ResourceNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * Handles ownership-based access violations.
+     *
+     * Triggered when: A tenant tries to access/modify another tenant's request.
+     * Returns: 403 Forbidden.
+     *
+     * This is different from AccessDeniedException (role-based).
+     * This is ownership-based: the user has the right role but doesn't own the resource.
+     */
+    @ExceptionHandler(UnauthorizedAccessException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthorizedAccess(UnauthorizedAccessException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
      * Handles invalid login credentials.
      *
      * Triggered when: AuthenticationManager.authenticate() fails because
