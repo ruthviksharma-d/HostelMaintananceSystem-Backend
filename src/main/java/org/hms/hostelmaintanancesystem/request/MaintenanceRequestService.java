@@ -1,0 +1,124 @@
+package org.hms.hostelmaintanancesystem.request;
+
+import lombok.RequiredArgsConstructor;
+import org.hms.hostelmaintanancesystem.common.exception.ResourceNotFoundException;
+import org.hms.hostelmaintanancesystem.common.exception.UnauthorizedAccessException;
+import org.hms.hostelmaintanancesystem.request.dto.CreateRequestDTO;
+import org.hms.hostelmaintanancesystem.request.dto.RequestResponse;
+import org.hms.hostelmaintanancesystem.user.User;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * Service handling business logic for Maintenance Requests.
+ *
+ * Implements CRUD operations with ownership validation.
+ */
+@Service
+@RequiredArgsConstructor
+public class MaintenanceRequestService {
+
+    private final MaintenanceRequestRepository requestRepository;
+
+    /**
+     * Creates a new maintenance request.
+     *
+     * @param dto  the input data from the client
+     * @param user the currently authenticated user (the creator)
+     * @return the created request, mapped to a DTO
+     */
+    public RequestResponse createRequest(CreateRequestDTO dto, User user) {
+        MaintenanceRequest request = MaintenanceRequest.builder()
+                .title(dto.getTitle())
+                .description(dto.getDescription())
+                .category(dto.getCategory())
+                .status(RequestStatus.OPEN) // Always start as OPEN
+                .createdBy(user)
+                .build();
+
+        MaintenanceRequest savedRequest = requestRepository.save(request);
+
+        return mapToResponse(savedRequest);
+    }
+
+    /**
+     * Retrieves a single request by ID.
+     *
+     * Includes ownership validation:
+     *   - MAINTENANCE staff can view ANY request.
+     *   - TENANT can only view requests they created.
+     *
+     * @param id   the request ID
+     * @param user the currently authenticated user
+     * @return the request DTO
+     * @throws ResourceNotFoundException if ID doesn't exist
+     * @throws UnauthorizedAccessException if a tenant tries to view someone else's request
+     */
+    public RequestResponse getRequestById(Long id, User user) {
+        MaintenanceRequest request = findRequestEntityById(id);
+
+        // Ownership validation for tenants
+        if (user.getRole().name().equals("TENANT") && !request.getCreatedBy().getId().equals(user.getId())) {
+            throw new UnauthorizedAccessException("You can only view your own maintenance requests.");
+        }
+
+        return mapToResponse(request);
+    }
+
+    /**
+     * Retrieves all requests created by the given user.
+     * Primarily used by tenants for their dashboard.
+     *
+     * @param user the currently authenticated user
+     * @return list of their requests
+     */
+    public List<RequestResponse> getMyRequests(User user) {
+        return requestRepository.findByCreatedByOrderByCreatedAtDesc(user).stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Retrieves all requests in the system.
+     * Primarily used by maintenance staff.
+     *
+     * @return list of all requests
+     */
+    public List<RequestResponse> getAllRequests() {
+        return requestRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Helper method to fetch the raw entity, used internally for updates/lookups.
+     */
+    protected MaintenanceRequest findRequestEntityById(Long id) {
+        return requestRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Maintenance request not found with id: " + id));
+    }
+
+    /**
+     * Maps the JPA entity to our safe, flattened DTO.
+     */
+    private RequestResponse mapToResponse(MaintenanceRequest request) {
+        return RequestResponse.builder()
+                .id(request.getId())
+                .title(request.getTitle())
+                .description(request.getDescription())
+                .category(request.getCategory())
+                .status(request.getStatus())
+                .createdById(request.getCreatedBy().getId())
+                .createdByName(request.getCreatedBy().getName())
+                .createdByEmail(request.getCreatedBy().getEmail())
+                .resolutionNote(request.getResolutionNote())
+                .resolvedAt(request.getResolvedAt())
+                .closedAt(request.getClosedAt())
+                .createdAt(request.getCreatedAt())
+                .updatedAt(request.getUpdatedAt())
+                .build();
+    }
+
+}
