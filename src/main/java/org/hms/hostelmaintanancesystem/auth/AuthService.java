@@ -5,7 +5,9 @@ import org.hms.hostelmaintanancesystem.auth.dto.AuthResponse;
 import org.hms.hostelmaintanancesystem.auth.dto.LoginRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.RegisterRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.UserResponse;
+import org.hms.hostelmaintanancesystem.common.Role;
 import org.hms.hostelmaintanancesystem.common.exception.DuplicateEmailException;
+import org.hms.hostelmaintanancesystem.common.exception.UnauthorizedAccessException;
 import org.hms.hostelmaintanancesystem.security.CustomUserDetails;
 import org.hms.hostelmaintanancesystem.security.JwtService;
 import org.hms.hostelmaintanancesystem.user.User;
@@ -99,6 +101,13 @@ public class AuthService {
      * @throws DuplicateEmailException if email already exists
      */
     public AuthResponse register(RegisterRequest request) {
+        // Business Rule #0: Only tenants can self-register
+        if (request.getRole() == Role.MAINTENANCE) {
+            throw new UnauthorizedAccessException(
+                    "Maintenance accounts cannot be self-registered. Please contact an administrator."
+            );
+        }
+
         // Business Rule #1: Unique email
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new DuplicateEmailException(
@@ -117,6 +126,7 @@ public class AuthService {
                 .email(request.getEmail())
                 .password(hashedPassword)  // HASHED, not plain
                 .role(request.getRole())
+                .phone("")  // phone is NOT NULL in schema; default to empty string
                 .build();
 
         // Save to database
