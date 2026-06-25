@@ -96,6 +96,19 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handles login attempts by tenants whose account is not yet approved.
+     *
+     * Triggered when: A PENDING or REJECTED tenant tries to log in.
+     * Returns: 403 Forbidden with a user-friendly message.
+     */
+    @ExceptionHandler(AccountNotApprovedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccountNotApproved(AccountNotApprovedException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
      * Handles invalid login credentials.
      *
      * Triggered when: AuthenticationManager.authenticate() fails because

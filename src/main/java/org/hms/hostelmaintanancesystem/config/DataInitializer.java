@@ -3,6 +3,7 @@ package org.hms.hostelmaintanancesystem.config;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hms.hostelmaintanancesystem.common.Role;
+import org.hms.hostelmaintanancesystem.user.ApprovalStatus;
 import org.hms.hostelmaintanancesystem.user.User;
 import org.hms.hostelmaintanancesystem.user.UserRepository;
 import org.springframework.boot.ApplicationArguments;
@@ -43,6 +44,7 @@ public class DataInitializer implements ApplicationRunner {
                 .password(passwordEncoder.encode(ADMIN_PASSWORD))
                 .role(Role.MAINTENANCE)
                 .phone("")
+                .approvalStatus(ApprovalStatus.APPROVED)
                 .build();
 
         userRepository.save(admin);

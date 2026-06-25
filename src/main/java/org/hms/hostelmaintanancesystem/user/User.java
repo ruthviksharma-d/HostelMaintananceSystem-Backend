@@ -76,4 +76,18 @@ public class User extends BaseEntity {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    /**
+     * Approval status for tenant accounts.
+     *
+     * Tenants start as PENDING and require maintenance staff approval.
+     * Maintenance staff accounts are always set to APPROVED.
+     *
+     * columnDefinition DEFAULT 'APPROVED' ensures existing DB rows
+     * get APPROVED automatically when the column is added.
+     */
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20, columnDefinition = "VARCHAR(20) NOT NULL DEFAULT 'APPROVED'")
+    private ApprovalStatus approvalStatus = ApprovalStatus.PENDING;
+
 }

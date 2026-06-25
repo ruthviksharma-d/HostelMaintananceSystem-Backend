@@ -144,6 +144,7 @@ public class SecurityConfig {
                         // ── MAINTENANCE-only endpoints ──
                         .requestMatchers(HttpMethod.GET, "/api/requests").hasRole("MAINTENANCE")
                         .requestMatchers(HttpMethod.PUT, "/api/requests/*/status").hasRole("MAINTENANCE")
+                        .requestMatchers("/api/admin/**").hasRole("MAINTENANCE")
 
                         // ── Everything else: just needs a valid JWT ──
                         .anyRequest().authenticated()

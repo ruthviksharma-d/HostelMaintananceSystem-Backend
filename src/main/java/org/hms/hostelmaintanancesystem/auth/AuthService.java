@@ -6,10 +6,12 @@ import org.hms.hostelmaintanancesystem.auth.dto.LoginRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.RegisterRequest;
 import org.hms.hostelmaintanancesystem.auth.dto.UserResponse;
 import org.hms.hostelmaintanancesystem.common.Role;
+import org.hms.hostelmaintanancesystem.common.exception.AccountNotApprovedException;
 import org.hms.hostelmaintanancesystem.common.exception.DuplicateEmailException;
 import org.hms.hostelmaintanancesystem.common.exception.UnauthorizedAccessException;
 import org.hms.hostelmaintanancesystem.security.CustomUserDetails;
 import org.hms.hostelmaintanancesystem.security.JwtService;
+import org.hms.hostelmaintanancesystem.user.ApprovalStatus;
 import org.hms.hostelmaintanancesystem.user.User;
 import org.hms.hostelmaintanancesystem.user.UserRepository;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -19,23 +21,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-/**
- * AuthService handles authentication and registration business logic.
- *
- * @Service -> Tells Spring: "Manage the lifecycle of this class."
- *             Spring creates ONE instance (singleton) and injects it
- *             wherever @Autowired or constructor injection is used.
- *
- * @RequiredArgsConstructor -> Lombok generates a constructor with ALL final fields.
- *                              Spring uses this constructor for dependency injection.
- *                              Cleaner than @Autowired on fields.
- *
- * Why constructor injection over @Autowired fields?
- *   - Fields can be null if not injected (harder to spot bugs).
- *   - Constructor injection guarantees dependencies exist at object creation.
- *   - Easier to unit test (pass mocks to constructor, no reflection needed).
- *   - Final fields = immutable dependencies = thread-safe.
- */
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -48,22 +33,9 @@ public class AuthService {
     /**
      * Authenticates a user with email and password, returns JWT.
      *
-     * Flow:
-     *   1. Create UsernamePasswordAuthenticationToken from request.
-     *   2. Delegate to AuthenticationManager.
-     *   3. AuthenticationManager -> DaoAuthenticationProvider
-     *        -> CustomUserDetailsService.loadUserByUsername(email)
-     *        -> PasswordEncoder.matches(rawPassword, storedHash)
-     *   4. If credentials match, return Authentication object.
-     *   5. Extract CustomUserDetails -> User -> generate JWT -> return AuthResponse.
-     *
-     * Throws:
-     *   BadCredentialsException  -> if email not found OR password wrong
-     *                               (Spring Security hides the difference to
-     *                                prevent user enumeration attacks)
-     *
-     * @param request login credentials
-     * @return AuthResponse with JWT token and user data
+     * After credential verification, tenants are additionally checked for
+     * approval status — PENDING and REJECTED tenants are blocked with a
+     * descriptive 403 message.
      */
     public AuthResponse login(LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
@@ -75,6 +47,22 @@ public class AuthService {
 
         CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
         User user = userDetails.getUser();
+
+        // Tenants must be APPROVED before they can access the system
+        if (user.getRole() == Role.TENANT) {
+            if (user.getApprovalStatus() == ApprovalStatus.PENDING) {
+                throw new AccountNotApprovedException(
+                        "Your hostel membership is awaiting approval by the maintenance team. " +
+                        "You will be notified once your account is approved."
+                );
+            }
+            if (user.getApprovalStatus() == ApprovalStatus.REJECTED) {
+                throw new AccountNotApprovedException(
+                        "Your account registration has been rejected. " +
+                        "Please contact the hostel administration for more information."
+                );
+            }
+        }
 
         String token = jwtService.generateToken(
                 user.getEmail(),
@@ -89,72 +77,48 @@ public class AuthService {
     }
 
     /**
-     * Registers a new user and returns JWT (so user is logged in immediately).
+     * Registers a new tenant account in PENDING state.
      *
-     * Business Rules:
-     *   1. Email must be unique (check DB first).
-     *   2. Password must be hashed before storage (NEVER plain text).
-     *   3. Role must be valid enum (enforced by RegisterRequest bean validation).
-     *
-     * @param request the registration input from client
-     * @return AuthResponse with JWT token and user data
-     * @throws DuplicateEmailException if email already exists
+     * New tenants cannot log in until a maintenance staff member approves them.
+     * Maintenance accounts cannot be self-registered.
      */
     public AuthResponse register(RegisterRequest request) {
-        // Business Rule #0: Only tenants can self-register
+        // Only tenants can self-register
         if (request.getRole() == Role.MAINTENANCE) {
             throw new UnauthorizedAccessException(
                     "Maintenance accounts cannot be self-registered. Please contact an administrator."
             );
         }
 
-        // Business Rule #1: Unique email
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new DuplicateEmailException(
                     "Email is already registered: " + request.getEmail()
             );
         }
 
-        // Business Rule #2: Hash password
-        // BCrypt automatically generates a salt and wraps it into the hash.
-        // The hashed string looks like: $2a$10$...(60 characters total)
         String hashedPassword = passwordEncoder.encode(request.getPassword());
 
-        // Build the User entity
+        // New tenants start as PENDING — @Builder.Default sets approvalStatus = PENDING
         User user = User.builder()
                 .name(request.getName())
                 .email(request.getEmail())
-                .password(hashedPassword)  // HASHED, not plain
+                .password(hashedPassword)
                 .role(request.getRole())
-                .phone("")  // phone is NOT NULL in schema; default to empty string
+                .phone("")
                 .build();
 
-        // Save to database
-        User savedUser = userRepository.save(user);
+        userRepository.save(user);
 
-        // Generate JWT token for the new user
-        String token = jwtService.generateToken(
-                savedUser.getEmail(),
-                savedUser.getId(),
-                savedUser.getRole().name()
-        );
-
-        // Return AuthResponse with token and user data
+        // Do NOT issue a JWT — the user must wait for approval before logging in.
+        // Return a response indicating that approval is required.
         return AuthResponse.builder()
-                .token(token)
-                .user(mapToUserResponse(savedUser))
+                .token(null)
+                .user(mapToUserResponse(user))
                 .build();
     }
 
     /**
      * Returns the currently authenticated user's profile.
-     *
-     * Extracts the user from Spring Security's SecurityContext,
-     * which was set by JwtAuthenticationFilter during request processing.
-     *
-     * @return UserResponse with the current user's safe data
-     * @throws RuntimeException if no user is authenticated (should never happen
-     *                          because this endpoint requires authentication)
      */
     public UserResponse getCurrentUser() {
         CustomUserDetails userDetails = (CustomUserDetails) SecurityContextHolder
@@ -165,14 +129,6 @@ public class AuthService {
         return mapToUserResponse(userDetails.getUser());
     }
 
-    /**
-     * Maps User entity to UserResponse DTO.
-     *
-     * Why a private helper method?
-     *   - Reusable: used by register, login, getMe, etc.
-     *   - Single source of truth for how User -> UserResponse conversion works.
-     *   - If we add a new field, we update ONE place, not every controller.
-     */
     private UserResponse mapToUserResponse(User user) {
         return UserResponse.builder()
                 .id(user.getId())
