@@ -46,6 +46,15 @@ public class User extends BaseEntity {
     private String email;
 
     /**
+     * Legacy database compatibility field.
+     * The current RegisterRequest/UserResponse DTOs do not expose phone, but
+     * existing local schemas may still have users.phone as NOT NULL.
+     */
+    @Builder.Default
+    @Column(nullable = false, length = 30)
+    private String phone = "";
+
+    /**
      * BCrypt-encoded password hash.
      * We NEVER store plain text passwords.
      * The encoder (in AuthService, Phase 4) produces ~60+ char strings.
